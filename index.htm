@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Moji demo</title>
+    <style>
+        input {
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .frm {
+            margin-bottom: 1em;
+        }
+
+        canvas {
+            border: 1px solid black;
+            margin: 1em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Moji demo</h1>
+
+    <p>
+        This is a sample implementation of an identicon algorithm described in <cite>LUGGEN, Michael. Moji: The advent of large identifiers and how to conquer them as human. MSc. thesis. eXascale Infolab, University of Fribourg. 2012.</cite> [<a href="https://exascale.info/assets/pdf/students/MSc_Thesis_-_Michael_Luggen__14_09_2012.pdf">available online</a>]
+    </p>
+    
+    <div class="frm">
+        <label for="hash">Hash:</label>
+        <input id="hash" size="40" />
+        <button id="btnRandom">Random</button><br />
+        <label for="selAlgorithm">Algorithm: </label>
+        <select id="selAlgorithm">
+            <option value="mojiPoints">Moji: Show points</option>
+            <option value="mojiFigBlobLines">Moji: Figure blob lines</option>
+            <option value="mojiFigBlobQuadCurves" selected="selected">Moji: Figure blob quadratic curves</option>
+        </select><br />
+        <label for="inputSaturation">Saturation:</label>
+        <input id="inputSaturation" type="range" min="0" max="1" step="0.01" value="0.5" />
+    </div>
+
+    <div class="canvas">
+        <canvas id="canvas" width="200" height="200"></canvas>
+    </div>
+
+    <script>
+        (function () {
+            const SIZE = 32;
+            const CENTER = SIZE / 2;
+            // const PALETTE = ['#332288', '#117733', '#44AA99', '#88CCEE', '#DDCC77', '#CC6677', '#AA4499', '#882255'];
+            const PALETTE = ["6b9ac4","97d8c4","eff2f1","f4b942",
+                             "ffe156","ffe9ce","ffb5c2","3777ff"];
+
+            function mainInit() {
+                const btnRandom = document.getElementById('btnRandom');
+                const inputHash = document.getElementById('hash');
+                const inputSaturation = document.getElementById('inputSaturation');
+                const selAlgorithm = document.getElementById('selAlgorithm');
+                let dirty = true;
+
+                function rerender() {
+                    render(inputHash.value.replaceAll(/[^a-f0-9]/ig, ''), selAlgorithm.value, inputSaturation.value);
+                    dirty = false;
+                    return false;
+                }
+
+                selAlgorithm.onchange = rerender;
+                inputHash.onchange = rerender;
+                inputHash.onkeydown = () => {
+                    if (!dirty) {
+                        setTimeout(rerender, 100);
+                        dirty = true;
+                    }
+                    return true;
+                }
+                inputSaturation.onchange = rerender;
+
+                btnRandom.onclick = function () {
+                    inputHash.value = [...Array(40)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+                    rerender();
+                    return false;
+                }
+
+                btnRandom.onclick();
+            }
+
+            function getJump(data, len) {
+                return data * SIZE * SIZE / ((len + 1) * 16 / 2);
+            }
+
+            function getPoints(hash, saturation) {
+                let jump = 0;
+                let pos = 0;
+                const len = hash.length;
+                let m = [];
+                for (let u = 0; u < SIZE; ++u) {
+                    for (let v = 0; v < SIZE; ++v) {
+                        if (jump <= 0 && pos < len) {
+                            const data = parseInt(hash[pos++], 16);
+                            if (data / 15 > 1 - saturation) {
+                                m.push([u, v]);
+                            }
+                            jump = getJump(data, len);
+                        } else {
+                            --jump;
+                        }
+                    }
+                }
+
+                m.sort(function (a, b) {
+                    return Math.atan2(a[0] - CENTER, a[1] - CENTER) - Math.atan2(b[0] - CENTER, b[1] - CENTER);
+                });
+
+                return m;
+            }
+
+            function renderPoints(ctx, pts, PIXELSIZE) {
+                ctx.fillStyle = 'black';
+                for (let pt of pts) {
+                    ctx.fillRect(pt[0] * PIXELSIZE, pt[1] * PIXELSIZE, PIXELSIZE, PIXELSIZE);
+                }
+            }
+
+            function renderFigureBlobLines(ctx, pts, PIXELSIZE) {
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                let start = pts[0];
+                ctx.moveTo(start[0] * PIXELSIZE, start[1] * PIXELSIZE);
+                for (let i = 1; i < pts.length; ++i) {
+                    let a = pts[i - 1];
+                    let b = pts[i];
+                    ctx.lineTo(b[0] * PIXELSIZE, b[1] * PIXELSIZE);
+                }
+                ctx.lineTo(start[0] * PIXELSIZE, start[1] * PIXELSIZE);
+                ctx.fillStyle = 'black';
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            function renderFigureBlobQuadCurves(ctx, pts, PIXELSIZE) {
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                let start = pts[0];
+                ctx.moveTo(start[0] * PIXELSIZE, start[1] * PIXELSIZE);
+                for (let i = 1; i < pts.length; i += 2) {
+                    let a = pts[i - 1];
+                    let b = pts[i];
+                    ctx.quadraticCurveTo(a[0] * PIXELSIZE, a[1] * PIXELSIZE, b[0] * PIXELSIZE, b[1] * PIXELSIZE);
+                }
+                ctx.lineTo(start[0] * PIXELSIZE, start[1] * PIXELSIZE);
+                ctx.fillStyle = 'black';
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            function render(hash, alg, saturation) {
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
+                const CANVAS_SIZE = Math.min(canvas.width, canvas.height);
+                const PIXELSIZE = Math.floor(CANVAS_SIZE / SIZE);
+
+                ctx.fillStyle = '#' + PALETTE[parseInt(hash[hash.length - 1], 16) % 8];
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                switch (alg) {
+                    case 'mojiPoints':
+                        renderPoints(ctx, getPoints(hash, saturation), PIXELSIZE);
+                        break;
+                    case 'mojiFigBlobLines':
+                        renderFigureBlobLines(ctx, getPoints(hash, saturation), PIXELSIZE);
+                        break;
+                    case 'mojiFigBlobQuadCurves':
+                        renderFigureBlobQuadCurves(ctx, getPoints(hash, saturation), PIXELSIZE);
+                        break;
+                    default:
+                        alert('Unknown algorithm!');
+                        break;
+                }
+            }
+
+            window.onload = mainInit;
+        })();
+    </script>
+</body>
+
+</html>
